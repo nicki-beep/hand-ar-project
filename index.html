@@ -2,136 +2,179 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Architect OS - Video Enabled</title>
+    <title>Architect OS - Sorcerer Edition</title>
     <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
-        /* This makes the camera video visible and mirrored behind the 3D blocks */
-        #video {
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            object-fit: cover; transform: scaleX(-1); z-index: -1;
-        }
-        #os-ui {
-            position: fixed; top: 20px; left: 20px; color: #00ff00; z-index: 10;
-            background: rgba(0, 40, 0, 0.6); padding: 15px; border: 1px solid #00ff00;
-            pointer-events: none; text-transform: uppercase;
-        }
-        #start-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: #000; display: flex; flex-direction: column;
-            justify-content: center; align-items: center; z-index: 100; color: #00ff00;
-        }
-        #start-btn {
-            padding: 15px 30px; font-size: 18px; background: transparent;
-            color: #00ff00; border: 2px solid #00ff00; cursor: pointer;
-            visibility: hidden;
-        }
+        #video { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); z-index: -1; }
+        #os-ui { position: fixed; top: 20px; left: 20px; color: #ffae00; z-index: 10; background: rgba(40, 20, 0, 0.7); padding: 15px; border: 1px solid #ffae00; pointer-events: none; font-size: 11px; line-height: 1.4; }
+        #start-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; color: #ffae00; }
+        #start-btn { padding: 15px 30px; font-size: 18px; background: transparent; color: #ffae00; border: 2px solid #ffae00; cursor: pointer; visibility: hidden; }
         .ready { visibility: visible !important; }
-        canvas { width: 100vw; height: 100vh; display: block; }
     </style>
 </head>
 <body>
 
 <div id="start-overlay">
-    <div id="loading-text">BIO_SYNC: LOADING MODEL...</div>
-    <button id="start-btn">BOOT ARCHITECT_OS</button>
+    <div id="loading-text">MYSTIC_OS: SYNCING RELICS...</div>
+    <button id="start-btn">BEGIN INCANTATION</button>
 </div>
 
 <div id="os-ui">
-    BIO_SYNC: ARCHITECT_OS_v4.1<br>
-    STATE: <span id="state">IDLE</span><br>
-    VOXELS: <span id="count">0</span>
+    MYSTIC_OS v5.0<br>
+    -----------------------------------<br>
+    🤏 PINCH INDEX: PLACE BLOCK<br>
+    ✋ SINGLE PALM: ERASER MODE<br>
+    👐 TWO PALMS: ELDRITCH SHIELDS<br>
+    ✌️ TWO FINGERS (BOTH): FIRE CONTROL<br>
+    🌀 ROTATE RIGHT SHIELD: SUMMON SNOW
 </div>
 
 <video id="video" autoplay playsinline></video>
 
 <script>
-let scene, camera, renderer, previewBlock, blocks = [];
+let scene, camera, renderer, previewBlock, blocks = [], worldGroup;
 let canAction = true;
-const GRID = 0.25;
+let leftShield, rightShield, fireL, fireR, snowSystem;
 
-// 1. THREE.JS SETUP WITH TRANSPARENCY
+// 1. SCENE SETUP
 scene = new THREE.Scene();
+worldGroup = new THREE.Group();
+scene.add(worldGroup);
 camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
-camera.position.z = 2;
-
-renderer = new THREE.WebGLRenderer({ 
-    alpha: true, // This allows the video to show through the background
-    antialias: true 
-});
+camera.position.z = 2.5;
+renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
-scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+// 2. MYSTIC ASSETS
+const shieldGeo = new THREE.RingGeometry(0.2, 0.25, 32);
+const shieldMat = new THREE.MeshBasicMaterial({ color: 0xff4400, side: THREE.DoubleSide, transparent: true, opacity: 0 });
+leftShield = new THREE.Mesh(shieldGeo, shieldMat);
+rightShield = new THREE.Mesh(shieldGeo, shieldMat.clone());
+scene.add(leftShield, rightShield);
 
-const boxGeo = new THREE.BoxGeometry(GRID, GRID, GRID);
-previewBlock = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }));
+const fireGeo = new THREE.SphereGeometry(0.1, 8, 8);
+const fireMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0 });
+fireL = new THREE.Mesh(fireGeo, fireMat);
+fireR = new THREE.Mesh(fireGeo, fireMat.clone());
+scene.add(fireL, fireR);
+
+const snowGeo = new THREE.BufferGeometry();
+const snowCount = 1000;
+const posArray = new Float32Array(snowCount * 3);
+for(let i=0; i<snowCount*3; i++) posArray[i] = (Math.random()-0.5)*10;
+snowGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+snowSystem = new THREE.Points(snowGeo, new THREE.PointsMaterial({ size: 0.02, color: 0xffffff, transparent:true, opacity:0 }));
+scene.add(snowSystem);
+
+const GRID = 0.2;
+previewBlock = new THREE.Mesh(new THREE.BoxGeometry(GRID,GRID,GRID), new THREE.MeshBasicMaterial({ color: 0xffae00, wireframe: true }));
 scene.add(previewBlock);
 
-// 2. AI HANDS
+// 3. AI HANDS
 const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.7 });
+hands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.7 });
 
-const startBtn = document.getElementById('start-btn');
 hands.initialize().then(() => {
-    document.getElementById('loading-text').innerText = "SYSTEM READY";
-    startBtn.classList.add('ready');
+    document.getElementById('loading-text').innerText = "RELICS READY";
+    document.getElementById('start-btn').classList.add('ready');
 });
 
 hands.onResults(results => {
-    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return;
+    const numHands = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
     
-    const lm = results.multiHandLandmarks[0];
-    const index = lm[8];
-    const thumb = lm[4];
+    // Hide magical elements by default
+    leftShield.material.opacity = 0;
+    rightShield.material.opacity = 0;
+    fireL.material.opacity = 0;
+    fireR.material.opacity = 0;
 
-    const pinch = Math.hypot(index.x - thumb.x, index.y - thumb.y) < 0.05;
-    const palmOpen = Math.hypot(lm[8].y - lm[0].y) > 0.3;
+    if (numHands === 0) return;
 
-    // Use mirrored coordinates to match the video
-    let x = (index.x - 0.5) * 4; 
-    let y = -(index.y - 0.5) * 3;
-    x = Math.round(x / GRID) * GRID;
-    y = Math.round(y / GRID) * GRID;
-    previewBlock.position.set(x, y, -1);
+    results.multiHandLandmarks.forEach((lm, index) => {
+        const isRightHand = results.multiHandedness[index].label === "Right";
+        
+        // Coordinates (Mirrored)
+        const x = -(lm[9].x - 0.5) * 4;
+        const y = -(lm[9].y - 0.5) * 3;
 
-    if (pinch && canAction) {
-        const voxel = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: 0x00ff00 }));
-        voxel.position.set(x, y, -1);
-        scene.add(voxel);
-        blocks.push(voxel);
-        updateUI("PLACING", blocks.length);
-        cooldown();
-    } else if (palmOpen && canAction && blocks.length > 0) {
-        scene.remove(blocks.pop());
-        updateUI("DELETING", blocks.length);
-        cooldown();
-    }
+        // GESTURE CHECKS
+        const palmOpen = Math.hypot(lm[8].y - lm[0].y) > 0.35;
+        const isPeace = Math.hypot(lm[8].y - lm[12].y) < 0.1 && lm[8].y < lm[6].y;
+        const pinch = Math.hypot(lm[8].x - lm[4].x, lm[8].y - lm[4].y) < 0.05;
+
+        // 1. ELDRITCH SHIELDS (Both Palms Open)
+        if (palmOpen && numHands === 2) {
+            const shield = isRightHand ? rightShield : leftShield;
+            shield.position.set(x, y, -0.5);
+            shield.material.opacity = 0.8;
+            shield.rotation.z += 0.1;
+
+            // 2. SNOW SUMMON (Rotate Right Shield)
+            if (isRightHand && shield.rotation.z > 5) {
+                snowSystem.material.opacity = 0.8;
+            }
+        }
+
+        // 3. FIRE CONTROL (Peace/Two Fingers Gesture)
+        if (isPeace) {
+            const fire = isRightHand ? fireR : fireL;
+            fire.position.set(x, y, -0.5);
+            fire.material.opacity = 1;
+            fire.scale.setScalar(1 + Math.sin(Date.now()*0.01)*0.2);
+        }
+
+        // 4. ERASER (Single Palm Open)
+        if (palmOpen && numHands === 1) {
+            previewBlock.material.color.set(0xff0000);
+            previewBlock.position.set(x, y, -0.5);
+            if (canAction) {
+                blocks.forEach((b, i) => {
+                    if (Math.hypot(b.position.x - x, b.position.y - y) < 0.3) {
+                        worldGroup.remove(b);
+                        blocks.splice(i, 1);
+                    }
+                });
+            }
+        }
+
+        // 5. BUILDER (Pinch)
+        if (pinch && numHands === 1 && !palmOpen) {
+            previewBlock.material.color.set(0x00ff00);
+            const sx = Math.round(x / GRID) * GRID;
+            const sy = Math.round(y / GRID) * GRID;
+            previewBlock.position.set(sx, sy, -0.5);
+            if (canAction) {
+                const b = new THREE.Mesh(new THREE.BoxGeometry(GRID,GRID,GRID), new THREE.MeshStandardMaterial({color: 0xffae00}));
+                b.position.set(sx, sy, -0.5);
+                worldGroup.add(b);
+                blocks.push(b);
+                canAction = false;
+                setTimeout(() => canAction = true, 500);
+            }
+        }
+    });
 });
 
-function cooldown() {
-    canAction = false;
-    setTimeout(() => { canAction = true; document.getElementById('state').innerText = "ACTIVE"; }, 600);
-}
-
-function updateUI(s, c) {
-    document.getElementById('state').innerText = s;
-    document.getElementById('count').innerText = c;
-}
-
-// 3. START
-startBtn.onclick = () => {
+// 4. ANIMATION & START
+document.getElementById('start-btn').onclick = () => {
     document.getElementById('start-overlay').style.display = 'none';
-    const cam = new Camera(document.getElementById("video"), {
+    new Camera(document.getElementById("video"), {
         onFrame: async () => await hands.send({ image: document.getElementById("video") }),
         width: 1280, height: 720
-    });
-    cam.start();
+    }).start();
 };
 
-function animate() { requestAnimationFrame(animate); renderer.render(scene, camera); }
+function animate() {
+    requestAnimationFrame(animate);
+    snowSystem.position.y -= 0.01;
+    if(snowSystem.position.y < -2) snowSystem.position.y = 2;
+    renderer.render(scene, camera);
+}
 animate();
 </script>
 </body>
