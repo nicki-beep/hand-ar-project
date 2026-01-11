@@ -2,73 +2,189 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Architect OS - CRT Mirror Edition</title>
+    <title>Architect OS - Mirror Fix</title>
     <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-    
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Helvetica', sans-serif; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
         
-        /* 1. MIRRORED VIDEO & CANVAS */
-        #video, #drawing_canvas, canvas { 
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; 
-            object-fit: cover; transform: scaleX(-1); 
-            animation: flicker 0.15s infinite; /* Added Flicker */
-        }
+        /* Mirroring the video feed */
+        #video { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); z-index: -2; }
         
-        #video { z-index: -1; filter: grayscale(1) contrast(1.4); }
-        #drawing_canvas { z-index: 1; pointer-events: none; opacity: 0.5; }
-
-        /* 2. THE SCANLINE CSS (Added here) */
-        body::after {
-            content: " ";
-            display: block;
-            position: absolute;
-            top: 0; left: 0; bottom: 0; right: 0;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.2) 50%), 
-                        linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
-            z-index: 20;
-            background-size: 100% 3px, 2px 100%;
-            pointer-events: none;
+        /* UI - Original Green Style */
+        #os-ui { 
+            position: fixed; top: 20px; left: 20px; color: #00ff00; z-index: 10; 
+            background: rgba(0, 40, 0, 0.6); padding: 15px; border: 1px solid #00ff00;
+            pointer-events: none; text-transform: uppercase;
         }
 
-        @keyframes flicker {
-            0% { opacity: 0.98; }
-            5% { opacity: 0.95; }
-            10% { opacity: 0.99; }
-            100% { opacity: 1; }
-        }
-
-        /* UI STYLING */
-        #ui-overlay {
-            position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
-            color: #fff; text-align: center; z-index: 30; letter-spacing: 3px; pointer-events: none;
-        }
-        #start-screen { 
+        #start-overlay { 
             position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: #000; display: flex; justify-content: center; 
-            align-items: center; z-index: 100; 
+            background: #000; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 100; color: #00ff00; 
         }
-        #start-btn { background: #fff; border: none; padding: 15px 30px; cursor: pointer; font-weight: bold; }
+
+        #start-btn { 
+            padding: 15px 30px; font-size: 18px; background: transparent; 
+            color: #00ff00; border: 2px solid #00ff00; cursor: pointer;
+            visibility: hidden; 
+        }
+        .ready { visibility: visible !important; }
+
+        /* Scanline Overlay Effect */
+        body::after {
+            content: " "; display: block; position: absolute; top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+            z-index: 20; background-size: 100% 4px; pointer-events: none; opacity: 0.3;
+        }
+
+        canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 1; }
+        #drawing_canvas { z-index: 2; opacity: 0.5; }
     </style>
 </head>
 <body>
 
-<div id="start-screen"><button id="start-btn">BOOT_MIRROR_OS</button></div>
+<div id="start-overlay">
+    <div id="loading-text">BIO_SYNC: LOADING MODEL...</div>
+    <button id="start-btn">BOOT ARCHITECT_OS</button>
+</div>
 
-<div id="ui-overlay">
-    <div id="color-label" style="font-size: 20px; font-weight: 900;">MODE: GREEN</div>
-    <div style="font-size: 10px; opacity: 0.6; margin-top: 5px;">VOXELS: <span id="count">0</span></div>
+<div id="os-ui">
+    STATE: <span id="state">IDLE</span><br>
+    COLOR: <span id="color-name">GREEN</span><br>
+    VOXELS: <span id="count">0</span>
 </div>
 
 <video id="video" autoplay playsinline></video>
 <canvas id="drawing_canvas"></canvas>
 
 <script>
-// Logic remains same as previous version but with scanline visual support
-// [Code continues with the Three.js and MediaPipe logic from the previous step]
+let scene, camera, renderer, worldGroup, previewBlock, blocks = [];
+let canAction = true, canColorChange = true;
+const GRID = 0.25;
+
+const colors = [0x00ff00, 0x0000ff, 0xff0000, 0x800080, 0xffa500];
+const colorNames = ["GREEN", "BLUE", "RED", "PURPLE", "ORANGE"];
+let colorIdx = 0;
+
+// 1. THREE.JS SETUP
+scene = new THREE.Scene();
+camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
+camera.position.z = 2.5;
+
+renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+renderer.setClearColor(0x000000, 0); 
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+worldGroup = new THREE.Group();
+scene.add(worldGroup);
+scene.add(new THREE.AmbientLight(0xffffff, 1.5));
+
+previewBlock = new THREE.Mesh(new THREE.BoxGeometry(GRID, GRID, GRID), new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true }));
+scene.add(previewBlock);
+
+// 2. HAND TRACKING WITH MIRROR FIX
+const drawCanvas = document.getElementById('drawing_canvas');
+const drawCtx = drawCanvas.getContext('2d');
+const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+
+hands.setOptions({ 
+    maxNumHands: 2, 
+    modelComplexity: 1, 
+    minDetectionConfidence: 0.8,
+    selfieMode: true // Synchronizes coordinates with mirrored video
+});
+
+let lastFistPos = null;
+
+hands.onResults(results => {
+    drawCanvas.width = window.innerWidth;
+    drawCanvas.height = window.innerHeight;
+    drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+
+    if (results.multiHandLandmarks) {
+        results.multiHandLandmarks.forEach((lm, i) => {
+            // Draw original green skeleton
+            drawConnectors(drawCtx, lm, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+            
+            const wrist = lm[0], thumb = lm[4], idx = lm[8], mid = lm[12];
+            
+            // Mirror-aligned coordinates
+            const x = (idx.x - 0.5) * 4.5; 
+            const y = -(idx.y - 0.5) * 3.5;
+
+            const isFist = Math.hypot(idx.x-wrist.x, idx.y-wrist.y) < 0.12;
+            const pinch = Math.hypot(idx.x-thumb.x, idx.y-thumb.y) < 0.04;
+            const isPeace = Math.hypot(idx.y-mid.y) < 0.06 && idx.y < wrist.y;
+            const isPalm = Math.hypot(idx.y-wrist.y) > 0.35;
+
+            // Gesture: Color Change
+            if (isPeace && canColorChange) {
+                colorIdx = (colorIdx + 1) % colors.length;
+                document.getElementById('color-name').innerText = colorNames[colorIdx];
+                canColorChange = false; setTimeout(() => canColorChange = true, 700);
+            }
+
+            // Gesture: Hold & Move (360)
+            if (isFist) {
+                if (lastFistPos) {
+                    worldGroup.position.x += (x - lastFistPos.x);
+                    worldGroup.position.y += (y - lastFistPos.y);
+                }
+                lastFistPos = {x, y};
+            } else { lastFistPos = null; }
+
+            // Gesture: Place
+            if (pinch && canAction && !isFist) {
+                const b = new THREE.Mesh(new THREE.BoxGeometry(GRID, GRID, GRID), new THREE.MeshStandardMaterial({ color: colors[colorIdx] }));
+                const vector = new THREE.Vector3(Math.round(x/GRID)*GRID, Math.round(y/GRID)*GRID, -1);
+                worldGroup.worldToLocal(vector);
+                b.position.copy(vector);
+                worldGroup.add(b); blocks.push(b);
+                document.getElementById('count').innerText = blocks.length;
+                canAction = false; setTimeout(() => canAction = true, 400);
+            }
+
+            // Gesture: Erase
+            if (isPalm && !isFist && blocks.length > 0 && canAction) {
+                worldGroup.remove(blocks.pop());
+                document.getElementById('count').innerText = blocks.length;
+                canAction = false; setTimeout(() => canAction = true, 400);
+            }
+
+            if (i === 0) previewBlock.position.set(Math.round(x/GRID)*GRID, Math.round(y/GRID)*GRID, -1);
+        });
+
+        // Prayer Reset
+        if (results.multiHandLandmarks.length === 2) {
+            if (Math.hypot(results.multiHandLandmarks[0][0].x - results.multiHandLandmarks[1][0].x) < 0.1) {
+                blocks.forEach(b => worldGroup.remove(b));
+                blocks = []; worldGroup.position.set(0,0,0); worldGroup.rotation.set(0,0,0);
+                document.getElementById('count').innerText = "0";
+            }
+        }
+    }
+});
+
+const startBtn = document.getElementById('start-btn');
+hands.initialize().then(() => {
+    document.getElementById('loading-text').innerText = "SYSTEM READY";
+    startBtn.classList.add('ready');
+});
+
+startBtn.onclick = () => {
+    document.getElementById('start-overlay').style.display = 'none';
+    new Camera(document.getElementById("video"), {
+        onFrame: async () => await hands.send({image: video}),
+        width: 1280, height: 720
+    }).start();
+};
+
+function animate() { requestAnimationFrame(animate); renderer.render(scene, camera); }
+animate();
 </script>
 </body>
 </html>
