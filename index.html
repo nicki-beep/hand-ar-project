@@ -2,76 +2,107 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Laptop Hand AR Project</title>
+    <title>Pro Hand AR - Laptop</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #111; font-family: 'Segoe UI', sans-serif; }
-        #start-btn { 
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; }
+        #container { position: relative; width: 100vw; height: 100vh; }
+        canvas { width: 100%; height: 100%; transform: scaleX(-1); }
+        #ui-layer { 
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            padding: 25px 50px; font-size: 22px; font-weight: bold; background: #007bff; 
-            color: white; border: none; border-radius: 12px; cursor: pointer; z-index: 10;
-            box-shadow: 0 4px 15px rgba(0,123,255,0.4);
+            text-align: center; z-index: 10;
         }
-        #start-btn:hover { background: #0056b3; }
-        canvas { width: 100vw; height: 100vh; display: block; transform: scaleX(-1); }
+        #start-btn { 
+            padding: 20px 40px; font-size: 22px; background: #28a745; 
+            color: white; border: none; border-radius: 15px; cursor: pointer;
+            box-shadow: 0 0 20px rgba(40, 167, 69, 0.5);
+        }
+        #status-msg { margin-top: 15px; color: #ffc107; font-size: 18px; }
     </style>
 </head>
 <body>
-    <button id="start-btn">START LAPTOP WEBCAM AR</button>
-    <video id="input_video" style="display:none;"></video>
-    <canvas id="output_canvas"></canvas>
+    <div id="container">
+        <div id="ui-layer">
+            <button id="start-btn">ACTIVATE AR CAMERA</button>
+            <div id="status-msg">Click button to start...</div>
+        </div>
+        <video id="input_video" style="display:none;"></video>
+        <canvas id="output_canvas"></canvas>
+    </div>
 
     <script>
         const videoElement = document.getElementById('input_video');
         const canvasElement = document.getElementById('output_canvas');
         const canvasCtx = canvasElement.getContext('2d');
-        const btn = document.getElementById('start-btn');
+        const startBtn = document.getElementById('start-btn');
+        const statusMsg = document.getElementById('status-msg');
 
-        function onResults(results) {
-            // Set canvas size to match window
+        // Initialize Hands AI
+        const hands = new Hands({
+            locateFile: (file) => https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        // This runs every time the AI finds a hand
+        hands.onResults((results) => {
             canvasElement.width = window.innerWidth;
             canvasElement.height = window.innerHeight;
-
+            
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            
-            // Draw the video frame
             canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-            if (results.multiHandLandmarks) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                statusMsg.innerText = "Hand Detected!";
                 for (const landmarks of results.multiHandLandmarks) {
-                    // Draw neon green connections
-                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
-                    // Draw red finger joints
-                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 3});
+                    // Draw Neon Skeleton
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
+                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2});
                     
-                    // Logic for the AR Crystal (Middle of Palm)
-                    const palm = landmarks[9]; 
-                    const x = palm.x * canvasElement.width;
-                    const y = palm.y * canvasElement.height;
-
-                    // Draw a glowing AR sphere on your palm
-                    canvasCtx.fillStyle = "rgba(0, 255, 255, 0.6)";
-                    canvasCtx.shadowBlur = 20;
-                    canvasCtx.shadowColor = "cyan";
+                    // Draw AR Ball on Palm
+                    const palm = landmarks[9];
+                    canvasCtx.fillStyle = "rgba(0, 255, 255, 0.7)";
                     canvasCtx.beginPath();
-                    canvasCtx.arc(x, y, 40, 0, 2 * Math.PI);
+                    canvasCtx.arc(palm.x * canvasElement.width, palm.y * canvasElement.height, 25, 0, 2 * Math.PI);
                     canvasCtx.fill();
                 }
+            } else {
+                statusMsg.innerText = "Show your hand to the camera";
             }
             canvasCtx.restore();
-        }
+        });
 
-        const hands = new Hands({locateFile: (file) => https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}});
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
-        hands.onResults(onResults);
-
-        btn.addEventListener('click', () => {
-            btn.style.display = 'none';
-            const camera = new Camera(videoElement, {
-                onFrame: async () => {
-                    await hands.send({image: videoElement});
-                },
-                width: 1280, height: 7
+        // The Start Function
+        startBtn.addEventListener('click', async () => {
+            startBtn.style.display = 'none';
+            statusMsg.innerText = "Connecting Camera...";
+            
+            try {
+                const camera = new Camera(videoElement, {
+                    onFrame: async () => {
+                        await hands.send({image: videoElement});
+                    },
+                    width: 1280,
+                    height: 720
+                });
+                
+                await camera.start();
+                statusMsg.innerText = "Camera On. Searching for hand...";
+                
+            } catch (err) {
+                statusMsg.innerText = "Error: " + err.message;
+                statusMsg.style.color = "red";
+                console.error(err);
+            }
+        });
+    </script>
+</body>
+</html>
