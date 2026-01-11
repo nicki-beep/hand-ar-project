@@ -1,72 +1,153 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <title>Fixed Black Screen AR</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
-    <style>
-        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
-        canvas { width: 100vw; height: 100vh; transform: scaleX(-1); }
-        #loading-ui { position: absolute; color: white; font-family: sans-serif; text-align: center; }
-        button { padding: 20px 40px; font-size: 20px; cursor: pointer; background: #28a745; color: white; border: none; border-radius: 10px; }
-    </style>
+<meta charset="UTF-8">
+<title>Hand Gesture Block Builder</title>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<style>
+body { margin:0; overflow:hidden; background:black; }
+#ui {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  color: white;
+  font-family: Arial;
+  z-index: 10;
+}
+button {
+  padding: 6px 10px;
+  margin-top: 6px;
+  font-size: 14px;
+}
+</style>
 </head>
+
 <body>
-    <div id="loading-ui">
-        <button id="start-btn">ENABLE CAMERA</button>
-        <p id="status"></p>
-    </div>
-    <video id="input_video" style="display:none" playsinline></video>
-    <canvas id="output_canvas"></canvas>
+<div id="ui">
+  🤏 Pinch = Place<br>
+  ✋ Open Palm = Delete<br>
+  <button onclick="resetWorld()">Reset</button>
+</div>
 
-    <script>
-        const videoElement = document.getElementById('input_video');
-        const canvasElement = document.getElementById('output_canvas');
-        const canvasCtx = canvasElement.getContext('2d');
-        const status = document.getElementById('status');
-        const startBtn = document.getElementById('start-btn');
+<video id="video" style="display:none"></video>
 
-        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1 });
+<script>
+let scene, camera, renderer;
+let previewBlock;
+let blocks = [];
+let canPlace = true;
 
-        hands.onResults((results) => {
-            canvasElement.width = window.innerWidth;
-            canvasElement.height = window.innerHeight;
-            canvasCtx.save();
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            
-            // This line forces the camera image to draw even if tracking hasn't started
-            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+// THREE SETUP
+scene = new THREE.Scene();
+camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+camera.position.z = 2;
 
-            if (results.multiHandLandmarks) {
-                for (const landmarks of results.multiHandLandmarks) {
-                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
-                }
-            }
-            canvasCtx.restore();
-        });
+renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
 
-        startBtn.onclick = async () => {
-            startBtn.style.display = 'none';
-            status.innerText = "Loading AI... Please wait 5-10 seconds";
-            
-            const camera = new Camera(videoElement, {
-                onFrame: async () => {
-                    await hands.send({image: videoElement});
-                },
-                width: 1280, height: 720
-            });
-            
-            try {
-                await camera.start();
-                // Force video play in case it's stuck
-                videoElement.play(); 
-            } catch (e) {
-                status.innerText = "Error: " + e.message;
-            }
-        };
-    </script>
+scene.add(new THREE.AmbientLight(0xffffff, 1));
+
+// GRID SIZE (Minecraft style)
+const GRID = 0.2;
+
+// PREVIEW BLOCK
+previewBlock = new THREE.Mesh(
+  new THREE.BoxGeometry(GRID,GRID,GRID),
+  new THREE.MeshStandardMaterial({
+    color: 0x00ff00,
+    transparent:true,
+    opacity:0.5
+  })
+);
+scene.add(previewBlock);
+
+// HAND TRACKING
+const video = document.getElementById("video");
+
+const hands = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  minDetectionConfidence: 0.8,
+  minTrackingConfidence: 0.8
+});
+
+hands.onResults(results => {
+  if (!results.multiHandLandmarks) return;
+
+  const lm = results.multiHandLandmarks[0];
+  const index = lm[8];
+  const thumb = lm[4];
+
+  // PINCH
+  const pinch =
+    Math.hypot(index.x - thumb.x, index.y - thumb.y) < 0.05;
+
+  // OPEN PALM (simple detection)
+  const palmOpen =
+    Math.hypot(lm[8].y - lm[0].y) > 0.25;
+
+  let x = (index.x - 0.5) * 3;
+  let y = -(index.y - 0.5) * 2;
+
+  // SNAP TO GRID
+  x = Math.round(x / GRID) * GRID;
+  y = Math.round(y / GRID) * GRID;
+
+  previewBlock.position.set(x, y, -1);
+
+  if (pinch && canPlace) {
+    placeBlock(x,y);
+    canPlace = false;
+    setTimeout(() => canPlace = true, 500);
+  }
+
+  if (palmOpen && blocks.length) {
+    removeLastBlock();
+  }
+});
+
+const cam = new Camera(video, {
+  onFrame: async () => await hands.send({ image: video }),
+  width: 640,
+  height: 480
+});
+cam.start();
+
+// FUNCTIONS
+function placeBlock(x,y){
+  const color = new THREE.Color().setHSL(Math.random(),0.6,0.5);
+  const block = new THREE.Mesh(
+    new THREE.BoxGeometry(GRID,GRID,GRID),
+    new THREE.MeshStandardMaterial({ color })
+  );
+  block.position.set(x,y,-1);
+  scene.add(block);
+  blocks.push(block);
+}
+
+function removeLastBlock(){
+  const block = blocks.pop();
+  if(block) scene.remove(block);
+}
+
+function resetWorld(){
+  blocks.forEach(b => scene.remove(b));
+  blocks = [];
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  renderer.render(scene,camera);
+}
+animate();
+</script>
 </body>
 </html>
