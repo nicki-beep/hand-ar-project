@@ -2,16 +2,21 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Architect OS v4.1</title>
+    <title>Architect OS - Video Enabled</title>
     <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+        /* This makes the camera video visible and mirrored behind the 3D blocks */
+        #video {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            object-fit: cover; transform: scaleX(-1); z-index: -1;
+        }
         #os-ui {
             position: fixed; top: 20px; left: 20px; color: #00ff00; z-index: 10;
-            background: rgba(0, 40, 0, 0.4); padding: 15px; border: 1px solid #00ff00;
-            pointer-events: none; text-transform: uppercase; line-height: 1.5;
+            background: rgba(0, 40, 0, 0.6); padding: 15px; border: 1px solid #00ff00;
+            pointer-events: none; text-transform: uppercase;
         }
         #start-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -21,62 +26,58 @@
         #start-btn {
             padding: 15px 30px; font-size: 18px; background: transparent;
             color: #00ff00; border: 2px solid #00ff00; cursor: pointer;
-            visibility: hidden; font-family: inherit;
+            visibility: hidden;
         }
-        .glitch { animation: flash 1s infinite; }
-        @keyframes flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-        canvas { width: 100vw; height: 100vh; transform: scaleX(-1); }
+        .ready { visibility: visible !important; }
+        canvas { width: 100vw; height: 100vh; display: block; }
     </style>
 </head>
 <body>
 
 <div id="start-overlay">
-    <div id="loading-text" class="glitch">BIO_SYNC: INITIALIZING...</div>
+    <div id="loading-text">BIO_SYNC: LOADING MODEL...</div>
     <button id="start-btn">BOOT ARCHITECT_OS</button>
 </div>
 
 <div id="os-ui">
     BIO_SYNC: ARCHITECT_OS_v4.1<br>
     STATE: <span id="state">IDLE</span><br>
-    VOXELS: <span id="count">0</span><br>
-    -------------------------<br>
-    PINCH: PLACE VOXEL<br>
-    OPEN PALM: DELETE LAST
+    VOXELS: <span id="count">0</span>
 </div>
 
-<video id="video" style="display:none"></video>
+<video id="video" autoplay playsinline></video>
 
 <script>
 let scene, camera, renderer, previewBlock, blocks = [];
 let canAction = true;
 const GRID = 0.25;
 
-// 1. SCENE SETUP
+// 1. THREE.JS SETUP WITH TRANSPARENCY
 scene = new THREE.Scene();
 camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
 camera.position.z = 2;
 
-renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+renderer = new THREE.WebGLRenderer({ 
+    alpha: true, // This allows the video to show through the background
+    antialias: true 
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-const light = new THREE.PointLight(0x00ff00, 2, 10);
-light.position.set(0, 0, 2);
-scene.add(light);
-scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+scene.add(new THREE.AmbientLight(0xffffff, 1.2));
 
-// 2. VOXEL SYSTEM
 const boxGeo = new THREE.BoxGeometry(GRID, GRID, GRID);
 previewBlock = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }));
 scene.add(previewBlock);
 
-// 3. AI HANDS SETUP
+// 2. AI HANDS
 const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
 hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.7 });
 
+const startBtn = document.getElementById('start-btn');
 hands.initialize().then(() => {
     document.getElementById('loading-text').innerText = "SYSTEM READY";
-    document.getElementById('start-btn').style.visibility = "visible";
+    startBtn.classList.add('ready');
 });
 
 hands.onResults(results => {
@@ -86,68 +87,51 @@ hands.onResults(results => {
     const index = lm[8];
     const thumb = lm[4];
 
-    // Gesture math
     const pinch = Math.hypot(index.x - thumb.x, index.y - thumb.y) < 0.05;
     const palmOpen = Math.hypot(lm[8].y - lm[0].y) > 0.3;
 
-    // Snap to Grid
-    let x = -(index.x - 0.5) * 4;
+    // Use mirrored coordinates to match the video
+    let x = (index.x - 0.5) * 4; 
     let y = -(index.y - 0.5) * 3;
     x = Math.round(x / GRID) * GRID;
     y = Math.round(y / GRID) * GRID;
     previewBlock.position.set(x, y, -1);
 
     if (pinch && canAction) {
-        createVoxel(x, y);
-        triggerCooldown();
+        const voxel = new THREE.Mesh(boxGeo, new THREE.MeshStandardMaterial({ color: 0x00ff00 }));
+        voxel.position.set(x, y, -1);
+        scene.add(voxel);
+        blocks.push(voxel);
+        updateUI("PLACING", blocks.length);
+        cooldown();
     } else if (palmOpen && canAction && blocks.length > 0) {
-        removeVoxel();
-        triggerCooldown();
+        scene.remove(blocks.pop());
+        updateUI("DELETING", blocks.length);
+        cooldown();
     }
 });
 
-function createVoxel(x, y) {
-    const mat = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x003300 });
-    const voxel = new THREE.Mesh(boxGeo, mat);
-    voxel.position.set(x, y, -1);
-    scene.add(voxel);
-    blocks.push(voxel);
-    updateUI("PLACING", blocks.length);
-}
-
-function removeVoxel() {
-    const v = blocks.pop();
-    scene.remove(v);
-    updateUI("DELETING", blocks.length);
-}
-
-function triggerCooldown() {
+function cooldown() {
     canAction = false;
-    setTimeout(() => {
-        canAction = true;
-        document.getElementById('state').innerText = "ACTIVE";
-    }, 600);
+    setTimeout(() => { canAction = true; document.getElementById('state').innerText = "ACTIVE"; }, 600);
 }
 
-function updateUI(state, count) {
-    document.getElementById('state').innerText = state;
-    document.getElementById('count').innerText = count;
+function updateUI(s, c) {
+    document.getElementById('state').innerText = s;
+    document.getElementById('count').innerText = c;
 }
 
-// 4. BOOT PROCESS
-document.getElementById('start-btn').onclick = () => {
+// 3. START
+startBtn.onclick = () => {
     document.getElementById('start-overlay').style.display = 'none';
     const cam = new Camera(document.getElementById("video"), {
         onFrame: async () => await hands.send({ image: document.getElementById("video") }),
-        width: 640, height: 480
+        width: 1280, height: 720
     });
     cam.start();
 };
 
-function animate() {
-    requestAnimationFrame(animate);
-    renderer.render(scene, camera);
-}
+function animate() { requestAnimationFrame(animate); renderer.render(scene, camera); }
 animate();
 </script>
 </body>
