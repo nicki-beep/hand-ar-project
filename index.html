@@ -1,151 +1,152 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Hand Gesture Block Builder</title>
-
-<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-
-<style>
-body { margin:0; overflow:hidden; background:black; }
-#ui {
-  position: fixed;
-  top: 10px;
-  left: 10px;
-  color: white;
-  font-family: Arial;
-  z-index: 10;
-}
-button {
-  padding: 6px 10px;
-  margin-top: 6px;
-  font-size: 14px;
-}
-</style>
+    <meta charset="UTF-8">
+    <title>Architect OS v4.1</title>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; }
+        #os-ui {
+            position: fixed; top: 20px; left: 20px; color: #00ff00; z-index: 10;
+            background: rgba(0, 40, 0, 0.4); padding: 15px; border: 1px solid #00ff00;
+            pointer-events: none; text-transform: uppercase; line-height: 1.5;
+        }
+        #start-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 100; color: #00ff00;
+        }
+        #start-btn {
+            padding: 15px 30px; font-size: 18px; background: transparent;
+            color: #00ff00; border: 2px solid #00ff00; cursor: pointer;
+            visibility: hidden; font-family: inherit;
+        }
+        .glitch { animation: flash 1s infinite; }
+        @keyframes flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        canvas { width: 100vw; height: 100vh; transform: scaleX(-1); }
+    </style>
 </head>
-
 <body>
-<div id="ui">
-  🤏 Pinch = Place<br>
-  ✋ Open Palm = Delete<br>
-  <button onclick="resetWorld()">Reset</button>
+
+<div id="start-overlay">
+    <div id="loading-text" class="glitch">BIO_SYNC: INITIALIZING...</div>
+    <button id="start-btn">BOOT ARCHITECT_OS</button>
+</div>
+
+<div id="os-ui">
+    BIO_SYNC: ARCHITECT_OS_v4.1<br>
+    STATE: <span id="state">IDLE</span><br>
+    VOXELS: <span id="count">0</span><br>
+    -------------------------<br>
+    PINCH: PLACE VOXEL<br>
+    OPEN PALM: DELETE LAST
 </div>
 
 <video id="video" style="display:none"></video>
 
 <script>
-let scene, camera, renderer;
-let previewBlock;
-let blocks = [];
-let canPlace = true;
+let scene, camera, renderer, previewBlock, blocks = [];
+let canAction = true;
+const GRID = 0.25;
 
-// THREE SETUP
+// 1. SCENE SETUP
 scene = new THREE.Scene();
-camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
 camera.position.z = 2;
 
-renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true });
+renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-scene.add(new THREE.AmbientLight(0xffffff, 1));
+const light = new THREE.PointLight(0x00ff00, 2, 10);
+light.position.set(0, 0, 2);
+scene.add(light);
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
-// GRID SIZE (Minecraft style)
-const GRID = 0.2;
-
-// PREVIEW BLOCK
-previewBlock = new THREE.Mesh(
-  new THREE.BoxGeometry(GRID,GRID,GRID),
-  new THREE.MeshStandardMaterial({
-    color: 0x00ff00,
-    transparent:true,
-    opacity:0.5
-  })
-);
+// 2. VOXEL SYSTEM
+const boxGeo = new THREE.BoxGeometry(GRID, GRID, GRID);
+previewBlock = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }));
 scene.add(previewBlock);
 
-// HAND TRACKING
-const video = document.getElementById("video");
+// 3. AI HANDS SETUP
+const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.7 });
 
-const hands = new Hands({
-  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
-});
-
-hands.setOptions({
-  maxNumHands: 1,
-  minDetectionConfidence: 0.8,
-  minTrackingConfidence: 0.8
+hands.initialize().then(() => {
+    document.getElementById('loading-text').innerText = "SYSTEM READY";
+    document.getElementById('start-btn').style.visibility = "visible";
 });
 
 hands.onResults(results => {
-  if (!results.multiHandLandmarks) return;
+    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) return;
+    
+    const lm = results.multiHandLandmarks[0];
+    const index = lm[8];
+    const thumb = lm[4];
 
-  const lm = results.multiHandLandmarks[0];
-  const index = lm[8];
-  const thumb = lm[4];
+    // Gesture math
+    const pinch = Math.hypot(index.x - thumb.x, index.y - thumb.y) < 0.05;
+    const palmOpen = Math.hypot(lm[8].y - lm[0].y) > 0.3;
 
-  // PINCH
-  const pinch =
-    Math.hypot(index.x - thumb.x, index.y - thumb.y) < 0.05;
+    // Snap to Grid
+    let x = -(index.x - 0.5) * 4;
+    let y = -(index.y - 0.5) * 3;
+    x = Math.round(x / GRID) * GRID;
+    y = Math.round(y / GRID) * GRID;
+    previewBlock.position.set(x, y, -1);
 
-  // OPEN PALM (simple detection)
-  const palmOpen =
-    Math.hypot(lm[8].y - lm[0].y) > 0.25;
-
-  let x = (index.x - 0.5) * 3;
-  let y = -(index.y - 0.5) * 2;
-
-  // SNAP TO GRID
-  x = Math.round(x / GRID) * GRID;
-  y = Math.round(y / GRID) * GRID;
-
-  previewBlock.position.set(x, y, -1);
-
-  if (pinch && canPlace) {
-    placeBlock(x,y);
-    canPlace = false;
-    setTimeout(() => canPlace = true, 500);
-  }
-
-  if (palmOpen && blocks.length) {
-    removeLastBlock();
-  }
+    if (pinch && canAction) {
+        createVoxel(x, y);
+        triggerCooldown();
+    } else if (palmOpen && canAction && blocks.length > 0) {
+        removeVoxel();
+        triggerCooldown();
+    }
 });
 
-const cam = new Camera(video, {
-  onFrame: async () => await hands.send({ image: video }),
-  width: 640,
-  height: 480
-});
-cam.start();
-
-// FUNCTIONS
-function placeBlock(x,y){
-  const color = new THREE.Color().setHSL(Math.random(),0.6,0.5);
-  const block = new THREE.Mesh(
-    new THREE.BoxGeometry(GRID,GRID,GRID),
-    new THREE.MeshStandardMaterial({ color })
-  );
-  block.position.set(x,y,-1);
-  scene.add(block);
-  blocks.push(block);
+function createVoxel(x, y) {
+    const mat = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x003300 });
+    const voxel = new THREE.Mesh(boxGeo, mat);
+    voxel.position.set(x, y, -1);
+    scene.add(voxel);
+    blocks.push(voxel);
+    updateUI("PLACING", blocks.length);
 }
 
-function removeLastBlock(){
-  const block = blocks.pop();
-  if(block) scene.remove(block);
+function removeVoxel() {
+    const v = blocks.pop();
+    scene.remove(v);
+    updateUI("DELETING", blocks.length);
 }
 
-function resetWorld(){
-  blocks.forEach(b => scene.remove(b));
-  blocks = [];
+function triggerCooldown() {
+    canAction = false;
+    setTimeout(() => {
+        canAction = true;
+        document.getElementById('state').innerText = "ACTIVE";
+    }, 600);
 }
 
-function animate(){
-  requestAnimationFrame(animate);
-  renderer.render(scene,camera);
+function updateUI(state, count) {
+    document.getElementById('state').innerText = state;
+    document.getElementById('count').innerText = count;
+}
+
+// 4. BOOT PROCESS
+document.getElementById('start-btn').onclick = () => {
+    document.getElementById('start-overlay').style.display = 'none';
+    const cam = new Camera(document.getElementById("video"), {
+        onFrame: async () => await hands.send({ image: document.getElementById("video") }),
+        width: 640, height: 480
+    });
+    cam.start();
+};
+
+function animate() {
+    requestAnimationFrame(animate);
+    renderer.render(scene, camera);
 }
 animate();
 </script>
