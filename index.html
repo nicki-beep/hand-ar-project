@@ -2,48 +2,53 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Master Architect OS</title>
+    <title>Architect OS - Perfect Mirror</title>
     <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
         #video { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; transform: scaleX(-1); z-index: -1; }
-        #os-ui { position: fixed; top: 20px; left: 20px; color: #00ff00; z-index: 10; background: rgba(0, 40, 0, 0.7); padding: 15px; border: 1px solid #00ff00; pointer-events: none; font-size: 14px; }
+        #os-ui { position: fixed; top: 20px; left: 20px; color: #00ff00; z-index: 10; background: rgba(0, 40, 0, 0.7); padding: 15px; border: 1px solid #00ff00; pointer-events: none; }
         #start-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; color: #00ff00; }
         #start-btn { padding: 15px 30px; font-size: 18px; background: transparent; color: #00ff00; border: 2px solid #00ff00; cursor: pointer; visibility: hidden; }
         .ready { visibility: visible !important; }
+        canvas#drawing_canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; transform: scaleX(-1); pointer-events: none; }
     </style>
 </head>
 <body>
 
 <div id="start-overlay">
-    <div id="loading-text">BIO_SYNC: LOADING MASTER_OS...</div>
-    <button id="start-btn">INITIALIZE ARCHITECT</button>
+    <div id="loading-text">BIO_SYNC: CALIBRATING MIRROR...</div>
+    <button id="start-btn">BOOT ARCHITECT</button>
 </div>
 
 <div id="os-ui">
-    STATUS: <span id="state">ACTIVE</span><br>
-    ------------------------------------<br>
-    🤏 PINCH: PLACE | ✊ FIST: MOVE BUILD<br>
-    ✊✊ TWO FISTS: ROTATE WORLD<br>
-    ✋ OPEN PALM: MAGIC SHIELD<br>
-    ✌️+THUMB: FLAME THROWER<br>
-    🔄 ROTATE RIGHT: SNOW ON / LEFT: OFF<br>
-    🙏 PALMS TOGETHER: RESET WORLD
+    COLOR: <span id="color-name" style="color:white">GREEN</span><br>
+    -------------------------<br>
+    🤏 PINCH: PLACE | ✋ PALM: ERASE<br>
+    ✊ 1 FIST: HOLD | ✊✊ 2 FISTS: 360° ROTATE<br>
+    ✌️ FLICK: COLOR | 🙏: RESET
 </div>
 
 <video id="video" autoplay playsinline></video>
+<canvas id="drawing_canvas"></canvas>
 
 <script>
-let scene, camera, renderer, worldGroup, snowParticles = null;
-let blocks = [], flames = [], canAction = true, isSnowing = false;
+let scene, camera, renderer, worldGroup, previewBlock, blocks = [];
+let canAction = true, canColorChange = true;
 const GRID = 0.25;
 
-// 1. SCENE SETUP
+// Color Cycle: Green, Blue, Red, Purple, Orange
+const colors = [0x00ff00, 0x0000ff, 0xff0000, 0x800080, 0xffa500];
+const colorNames = ["GREEN", "BLUE", "RED", "PURPLE", "ORANGE"];
+let colorIdx = 0;
+
+// 1. THREE.JS SETUP
 scene = new THREE.Scene();
 camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 100);
-camera.position.z = 2;
+camera.position.z = 3;
 renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
@@ -52,129 +57,110 @@ scene.add(new THREE.AmbientLight(0xffffff, 1.2));
 worldGroup = new THREE.Group();
 scene.add(worldGroup);
 
-// MAGIC SHIELD (Using your uploaded design style)
-const shieldGeo = new THREE.RingGeometry(0.3, 0.45, 32);
-const shieldMat = new THREE.MeshBasicMaterial({ color: 0xff4500, side: THREE.DoubleSide, transparent: true, opacity: 0.7, wireframe: true });
-const shieldL = new THREE.Mesh(shieldGeo, shieldMat);
-const shieldR = new THREE.Mesh(shieldGeo, shieldMat);
-scene.add(shieldL, shieldR);
+previewBlock = new THREE.Mesh(new THREE.BoxGeometry(GRID, GRID, GRID), new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true }));
+scene.add(previewBlock);
 
-// 2. GESTURE SYSTEMS
-function toggleSnow(state) {
-    if (state && !isSnowing) {
-        const geo = new THREE.BufferGeometry();
-        const pos = [];
-        for(let i=0; i<800; i++) pos.push((Math.random()-0.5)*10, Math.random()*5, (Math.random()-0.5)*10);
-        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-        snowParticles = new THREE.Points(geo, new THREE.PointsMaterial({color: 0xffffff, size: 0.04}));
-        scene.add(snowParticles);
-        isSnowing = true;
-    } else if (!state && isSnowing) {
-        scene.remove(snowParticles);
-        isSnowing = false;
-    }
-}
+// 2. HAND OUTLINE SETUP
+const drawCanvas = document.getElementById('drawing_canvas');
+const drawCtx = drawCanvas.getContext('2d');
 
-function createFlame(x, y) {
-    const f = new THREE.Mesh(new THREE.SphereGeometry(0.06), new THREE.MeshBasicMaterial({color: 0xff2200}));
-    f.position.set(x, y, -0.8);
-    scene.add(f);
-    flames.push({obj: f, life: 1.0, vx: (Math.random()-0.5)*0.02});
-}
-
-// 3. AI HAND TRACKING
+// 3. GESTURE LOGIC
 const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-hands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.6 });
+hands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.7 });
 
-let lastPos = null;
+let lastFistPos = null;
 
 hands.onResults(results => {
-    shieldL.visible = shieldR.visible = false;
+    // Clear Hand Outline Canvas
+    drawCanvas.width = window.innerWidth;
+    drawCanvas.height = window.innerHeight;
+    drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+
     if (!results.multiHandLandmarks) return;
 
     let fists = [];
+    const landmarks = results.multiHandLandmarks;
 
-    // 🙏 RESET GESTURE
-    if (results.multiHandLandmarks.length === 2) {
-        const h1 = results.multiHandLandmarks[0][0], h2 = results.multiHandLandmarks[1][0];
-        if (Math.hypot(h1.x-h2.x, h1.y-h2.y) < 0.08) {
-            blocks.forEach(b => worldGroup.remove(b));
-            blocks = []; toggleSnow(false);
-            worldGroup.position.set(0,0,0); worldGroup.rotation.set(0,0,0);
-        }
-    }
+    landmarks.forEach((lm, i) => {
+        // Draw Neon Outline 
+        drawConnectors(drawCtx, lm, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+        drawLandmarks(drawCtx, lm, {color: '#FFFFFF', lineWidth: 1, radius: 3});
 
-    results.multiHandLandmarks.forEach((lm, i) => {
-        const isRight = results.multiHandedness[i].label === "Right";
-        const wrist = lm[0], thumb = lm[4], idx = lm[8], mid = lm[12], ring = lm[16], pky = lm[20];
+        const wrist = lm[0], thumb = lm[4], idx = lm[8], mid = lm[12], pky = lm[20];
         
-        const x = (idx.x - 0.5) * 4;
+        // MIRROR MATH: -1 on X ensures it follows your hand like a mirror
+        const x = (idx.x - 0.5) * 5; 
         const y = -(idx.y - 0.5) * 3;
 
-        const isFist = Math.hypot(idx.x-wrist.x, idx.y-wrist.y) < 0.12;
-        const isShield = Math.hypot(mid.y - wrist.y) > 0.3;
+        const isFist = Math.hypot(idx.x-wrist.x, idx.y-wrist.y) < 0.15;
+        const isPalm = Math.hypot(idx.y-wrist.y) > 0.3;
         const pinch = Math.hypot(idx.x-thumb.x, idx.y-thumb.y) < 0.05;
-        const isFlame = Math.hypot(idx.y-mid.y) < 0.05 && thumb.x > idx.x;
+        const isPeace = Math.hypot(idx.y-mid.y) < 0.08 && idx.y < wrist.y;
+
+        // Color Change (✌️)
+        if (isPeace && canColorChange) {
+            colorIdx = (colorIdx + 1) % colors.length;
+            previewBlock.material.color.setHex(colors[colorIdx]);
+            document.getElementById('color-name').innerText = colorNames[colorIdx];
+            canColorChange = false; setTimeout(() => canColorChange = true, 700);
+        }
 
         if (isFist) fists.push({x, y});
 
-        // ACTION: SNOW ROTATION
-        const angle = Math.atan2(thumb.y - wrist.y, thumb.x - wrist.x);
-        if (isRight) {
-            if (angle > 0.7) toggleSnow(true);
-            if (angle < -0.7) toggleSnow(false);
+        // HOLD & ROTATE
+        if (fists.length === 1 && isFist) {
+            if (lastFistPos) {
+                worldGroup.position.x += (x - lastFistPos.x);
+                worldGroup.position.y += (y - lastFistPos.y);
+            }
+            lastFistPos = {x, y};
+        } else if (fists.length === 2) {
+            worldGroup.rotation.y += 0.05;
+        } else {
+            lastFistPos = null;
         }
 
-        // ACTION: SHIELD
-        if (isShield && !isFist) {
-            const s = isRight ? shieldR : shieldL;
-            s.visible = true; s.position.set(x, y, -0.5); s.rotation.z += 0.05;
+        // ERASE
+        if (isPalm && !isFist && blocks.length > 0 && canAction) {
+            const b = blocks.pop();
+            worldGroup.remove(b);
+            canAction = false; setTimeout(() => canAction = true, 500);
         }
 
-        // ACTION: FLAME
-        if (isFlame) createFlame(x, y);
-
-        // ACTION: PLACE BLOCK
+        // PLACE
         if (pinch && canAction && !isFist) {
-            const b = new THREE.Mesh(new THREE.BoxGeometry(GRID, GRID, GRID), new THREE.MeshStandardMaterial({color: 0x00ff00}));
-            b.position.set(Math.round(x/GRID)*GRID - worldGroup.position.x, Math.round(y/GRID)*GRID - worldGroup.position.y, -1);
+            const b = new THREE.Mesh(new THREE.BoxGeometry(GRID, GRID, GRID), new THREE.MeshStandardMaterial({color: colors[colorIdx]}));
+            const vector = new THREE.Vector3(Math.round(x/GRID)*GRID, Math.round(y/GRID)*GRID, -1);
+            worldGroup.worldToLocal(vector);
+            b.position.copy(vector);
             worldGroup.add(b); blocks.push(b);
             canAction = false; setTimeout(() => canAction = true, 500);
         }
 
-        // ACTION: MANIPULATION
-        if (fists.length === 1 && isFist) {
-            worldGroup.position.x += (x - (lastPos?.x || x)) * 0.8;
-            worldGroup.position.y += (y - (lastPos?.y || y)) * 0.8;
-        } else if (fists.length === 2) {
-            worldGroup.rotation.y += 0.03;
-        }
-        lastPos = {x, y};
+        if (i === 0) previewBlock.position.set(Math.round(x/GRID)*GRID, Math.round(y/GRID)*GRID, -1);
     });
+
+    // RESET (🙏)
+    if (landmarks.length === 2) {
+        if (Math.hypot(landmarks[0][0].x-landmarks[1][0].x) < 0.1) {
+            blocks.forEach(b => worldGroup.remove(b));
+            blocks = []; worldGroup.position.set(0,0,0); worldGroup.rotation.set(0,0,0);
+        }
+    }
 });
 
-// 4. ANIMATION LOOP
-function animate() {
-    requestAnimationFrame(animate);
-    if (isSnowing && snowParticles) {
-        snowParticles.position.y -= 0.02;
-        if (snowParticles.position.y < -3) snowParticles.position.y = 2;
-    }
-    flames.forEach((f, i) => {
-        f.obj.position.y += 0.04; f.obj.position.x += f.vx;
-        f.life -= 0.03; f.obj.scale.set(f.life, f.life, f.life);
-        if (f.life <= 0) { scene.remove(f.obj); flames.splice(i, 1); }
-    });
-    renderer.render(scene, camera);
-}
-animate();
-
+// BOOT ENGINE
 const startBtn = document.getElementById('start-btn');
 hands.initialize().then(() => startBtn.classList.add('ready'));
 startBtn.onclick = () => {
     document.getElementById('start-overlay').style.display = 'none';
-    new Camera(document.getElementById("video"), { onFrame: async () => await hands.send({image: video}), width: 1280, height: 720 }).start();
+    new Camera(document.getElementById("video"), { 
+        onFrame: async () => await hands.send({image: document.getElementById("video")}), 
+        width: 1280, height: 720 
+    }).start();
 };
+function animate() { requestAnimationFrame(animate); renderer.render(scene, camera); }
+animate();
 </script>
 </body>
 </html>
