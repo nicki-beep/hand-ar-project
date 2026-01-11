@@ -1,50 +1,77 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Hand AR Test</title>
+    <meta charset="utf-8">
+    <title>Laptop Hand AR Project</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
-        body { margin: 0; background: #000; color: white; font-family: sans-serif; text-align: center; }
+        body { margin: 0; overflow: hidden; background: #111; font-family: 'Segoe UI', sans-serif; }
         #start-btn { 
-            padding: 20px 40px; font-size: 20px; background: #28a745; 
-            color: white; border: none; border-radius: 10px; margin-top: 50%;
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            padding: 25px 50px; font-size: 22px; font-weight: bold; background: #007bff; 
+            color: white; border: none; border-radius: 12px; cursor: pointer; z-index: 10;
+            box-shadow: 0 4px 15px rgba(0,123,255,0.4);
         }
-        #status { margin-top: 20px; color: #ffc107; font-weight: bold; }
+        #start-btn:hover { background: #0056b3; }
+        canvas { width: 100vw; height: 100vh; display: block; transform: scaleX(-1); }
     </style>
 </head>
 <body>
-    <button id="start-btn">ALLOW CAMERA & START</button>
-    <div id="status">Ready to test...</div>
+    <button id="start-btn">START LAPTOP WEBCAM AR</button>
     <video id="input_video" style="display:none;"></video>
-    <canvas id="output_canvas" style="width:100%; height:100%;"></canvas>
+    <canvas id="output_canvas"></canvas>
 
     <script>
         const videoElement = document.getElementById('input_video');
-        const statusDiv = document.getElementById('status');
-        const startBtn = document.getElementById('start-btn');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const btn = document.getElementById('start-btn');
 
-        startBtn.addEventListener('click', async () => {
-            statusDiv.innerText = "Requesting Camera...";
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                statusDiv.innerText = "SUCCESS! Camera Connected.";
-                statusDiv.style.color = "#28a745";
-                videoElement.srcObject = stream;
-                startBtn.style.display = 'none';
-            } catch (err) {
-                statusDiv.style.color = "#dc3545";
-                if (err.name === 'NotAllowedError') {
-                    statusDiv.innerText = "ERROR: Permission Denied. Check browser settings.";
-                } else if (err.name === 'NotFoundError') {
-                    statusDiv.innerText = "ERROR: No Camera hardware found.";
-                } else {
-                    statusDiv.innerText = "ERROR: " + err.message;
+        function onResults(results) {
+            // Set canvas size to match window
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            // Draw the video frame
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    // Draw neon green connections
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 4});
+                    // Draw red finger joints
+                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1, radius: 3});
+                    
+                    // Logic for the AR Crystal (Middle of Palm)
+                    const palm = landmarks[9]; 
+                    const x = palm.x * canvasElement.width;
+                    const y = palm.y * canvasElement.height;
+
+                    // Draw a glowing AR sphere on your palm
+                    canvasCtx.fillStyle = "rgba(0, 255, 255, 0.6)";
+                    canvasCtx.shadowBlur = 20;
+                    canvasCtx.shadowColor = "cyan";
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(x, y, 40, 0, 2 * Math.PI);
+                    canvasCtx.fill();
                 }
-                console.error(err);
             }
-        });
-    </script>
-</body>
-</html>
+            canvasCtx.restore();
+        }
+
+        const hands = new Hands({locateFile: (file) => https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}});
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+        hands.onResults(onResults);
+
+        btn.addEventListener('click', () => {
+            btn.style.display = 'none';
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({image: videoElement});
+                },
+                width: 1280, height: 7
