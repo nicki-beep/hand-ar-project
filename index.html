@@ -1,123 +1,129 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Universal Hand AR</title>
-  
-  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-
-  <style>
-    body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ultimate Gesture AR</title>
     
-    /* Fullscreen mirrored camera feed */
-    #webcam-video {
-      position: fixed; top: 0; left: 0; 
-      width: 100vw; height: 100vh;
-      object-fit: cover;
-      transform: scaleX(-1); /* Mirror for natural movement */
-      z-index: -1;
-    }
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-    /* Floating Status UI */
-    .hud {
-      position: absolute; top: 20px; left: 20px;
-      color: #00ffcc; background: rgba(0, 0, 0, 0.7);
-      padding: 15px; border-radius: 10px; border: 1px solid #00ffcc;
-      z-index: 100; pointer-events: none;
-    }
+    <style>
+        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        
+        /* Fullscreen Camera */
+        #webcam-video {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            object-fit: cover; transform: scaleX(-1); z-index: -1;
+        }
 
-    /* Desktop/Laptop UI tweaks */
-    @media (min-width: 1024px) {
-      .hud { font-size: 18px; }
-    }
-  </style>
+        /* Start Button - Crucial for Browser Permissions */
+        #overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 1000;
+        }
+
+        #start-btn {
+            padding: 20px 40px; font-size: 20px; background: #00ffcc;
+            border: none; border-radius: 50px; cursor: pointer; font-weight: bold;
+        }
+
+        .hud {
+            position: absolute; top: 20px; left: 20px; color: #00ffcc;
+            background: rgba(0,0,0,0.7); padding: 15px; border-radius: 10px;
+            z-index: 100; pointer-events: none; display: none;
+        }
+    </style>
 </head>
 <body>
 
-  <div class="hud">
-    STATUS: <span id="status">INIT...</span><br>
-    GESTURE: <span id="gesture">WAITING</span>
-  </div>
+    <div id="overlay">
+        <h1 style="color: white; margin-bottom: 20px;">Hand Gesture AR</h1>
+        <button id="start-btn">ALLOW CAMERA & START</button>
+        <p style="color: #888; margin-top: 15px;">Stand in a well-lit area</p>
+    </div>
 
-  <video id="webcam-video" autoplay playsinline></video>
+    <div class="hud" id="hud">
+        SYSTEM: <span id="status">ACTIVE</span><br>
+        GESTURE: <span id="gesture">OPEN PALM</span>
+    </div>
 
-  <a-scene embedded vr-mode-ui="enabled: false" renderer="alpha: true;">
-    <a-entity id="ar-object" 
-              geometry="primitive: octahedron" 
-              material="color: #00ffcc; emissive: #004433; transparent: true; opacity: 0.9" 
-              position="0 1.6 -1"
-              scale="0.2 0.2 0.2">
-    </a-entity>
+    <video id="webcam-video" autoplay playsinline></video>
 
-    <a-camera position="0 1.6 0" look-controls="enabled: false"></a-camera>
-    <a-light type="ambient" intensity="0.8"></a-light>
-    <a-light type="point" position="1 2 1"></a-light>
-  </a-scene>
+    <a-scene embedded vr-mode-ui="enabled: false" renderer="alpha: true;">
+        <a-entity id="ar-object" 
+                  geometry="primitive: crystal" 
+                  material="color: #00ffcc; emissive: #004433; opacity: 0.8; transparent: true" 
+                  position="0 1.6 -1"
+                  scale="0.2 0.2 0.2"
+                  animation="property: rotation; to: 0 360 0; loop: true; dur: 4000; easing: linear">
+        </a-entity>
 
-  <script>
-    const videoElement = document.getElementById('webcam-video');
-    const arObj = document.getElementById('ar-object');
-    const statusText = document.getElementById('status');
-    const gestureText = document.getElementById('gesture');
+        <a-light type="ambient" intensity="0.7"></a-light>
+        <a-light type="point" position="1 2 1" intensity="0.8"></a-light>
+        <a-camera position="0 1.6 0" look-controls="enabled: false"></a-camera>
+    </a-scene>
 
-    // Initialize MediaPipe Hands
-    const hands = new Hands({
-      locateFile: (file) => https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}
-    });
+    <script>
+        const videoElement = document.getElementById('webcam-video');
+        const startBtn = document.getElementById('start-btn');
+        const overlay = document.getElementById('overlay');
+        const hud = document.getElementById('hud');
+        const arObj = document.getElementById('ar-object');
+        const gestureText = document.getElementById('gesture');
 
-    // Detect if device is a phone for performance optimization
-    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        // Initialize MediaPipe
+        const hands = new Hands({
+            locateFile: (file) => https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}
+        });
 
-    hands.setOptions({
-      maxNumHands: 1,
-      modelComplexity: isMobile ? 0 : 1, // '0' is faster for mobile chips
-      minDetectionConfidence: 0.7,
-      minTrackingConfidence: 0.7
-    });
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
 
-    hands.onResults((results) => {
-      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        statusText.innerText = "TRACKING";
-        const landmarks = results.multiHandLandmarks[0];
+        hands.onResults((results) => {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Map position to 3D Space
+                const x = (landmarks[9].x - 0.5) * -4; 
+                const y = (0.5 - landmarks[9].y) * 3 + 1.6;
+                arObj.setAttribute('position', ${x} ${y} -1.2);
 
-        // 1. Position Mapping (Wrist/Palm Center)
-        // Landmark 9 is the middle of the hand
-        const xMapping = (landmarks[9].x - 0.5) * -4; 
-        const yMapping = (0.5 - landmarks[9].y) * 3 + 1.6;
-        arObj.setAttribute('position', ${xMapping} ${yMapping} -1.2);
+                // Detect Pinch (Distance between Landmark 4 and 8)
+                const dist = Math.hypot(landmarks[4].x - landmarks[8].x, landmarks[4].y - landmarks[8].y);
+                
+                if (dist < 0.05) {
+                    gestureText.innerText = "PINCHING";
+                    arObj.setAttribute('material', 'color', '#ff3388');
+                    arObj.setAttribute('scale', '0.3 0.3 0.3');
+                } else {
+                    gestureText.innerText = "OPEN PALM";
+                    arObj.setAttribute('material', 'color', '#00ffcc');
+                    arObj.setAttribute('scale', '0.2 0.2 0.2');
+                }
+            }
+        });
 
-        // 2. Gesture: The Pinch (Distance between Thumb 4 and Index 8)
-        const dx = landmarks[4].x - landmarks[8].x;
-        const dy = landmarks[4].y - landmarks[8].y;
-        const pinchDist = Math.sqrt(dx*dx + dy*dy);
+        // Click handler to trigger camera
+        startBtn.addEventListener('click', () => {
+            overlay.style.display = 'none';
+            hud.style.display = 'block';
 
-        if (pinchDist < 0.05) {
-          gestureText.innerText = "SELECT (PINCH)";
-          arObj.setAttribute('material', 'color', '#ff3388');
-          arObj.object3D.rotation.y += 0.2; // Spin faster when pinched
-        } else {
-          gestureText.innerText = "OPEN PALM";
-          arObj.setAttribute('material', 'color', '#00ffcc');
-          arObj.object3D.rotation.y += 0.02; // Slow hover spin
-        }
-      } else {
-        statusText.innerText = "SEARCHING...";
-        gestureText.innerText = "NONE";
-      }
-    });
-
-    // Start Webcam
-    const camera = new Camera(videoElement, {
-      onFrame: async () => {
-        await hands.send({image: videoElement});
-      },
-      width: 1280,
-      height: 720
-    });
-    camera.start();
-  </script>
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({image: videoElement});
+                },
+                width: 1280,
+                height: 720
+            });
+            camera.start();
+        });
+    </script>
 </body>
 </html>
