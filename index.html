@@ -2,73 +2,71 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Force Start AR</title>
+    <title>Fixed Black Screen AR</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils"></script>
     <style>
-        body { margin: 0; background: #222; color: white; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-        #start-btn { 
-            padding: 30px 60px; font-size: 24px; background: #ff4757; 
-            color: white; border: 5px solid white; cursor: pointer; z-index: 100;
-        }
-        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform: scaleX(-1); background: #000; }
-        #log { position: fixed; bottom: 10px; color: lime; font-family: monospace; font-size: 12px; }
+        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        canvas { width: 100vw; height: 100vh; transform: scaleX(-1); }
+        #loading-ui { position: absolute; color: white; font-family: sans-serif; text-align: center; }
+        button { padding: 20px 40px; font-size: 20px; cursor: pointer; background: #28a745; color: white; border: none; border-radius: 10px; }
     </style>
 </head>
 <body>
-    <button id="start-btn" onclick="startApp()">CLICK HERE TO START</button>
-    <canvas id="out"></canvas>
-    <video id="vid" style="display:none"></video>
-    <div id="log">Status: Waiting for click...</div>
+    <div id="loading-ui">
+        <button id="start-btn">ENABLE CAMERA</button>
+        <p id="status"></p>
+    </div>
+    <video id="input_video" style="display:none" playsinline></video>
+    <canvas id="output_canvas"></canvas>
 
     <script>
-        const log = document.getElementById('log');
-        function print(msg) { log.innerText = "Status: " + msg; console.log(msg); }
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const status = document.getElementById('status');
+        const startBtn = document.getElementById('start-btn');
 
-        async function startApp() {
-            print("Button clicked! Checking camera...");
-            const video = document.getElementById('vid');
-            const canvas = document.getElementById('out');
-            const ctx = canvas.getContext('2d');
-            const btn = document.getElementById('start-btn');
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1 });
 
-            try {
-                // 1. Force the button to disappear immediately
-                btn.style.display = 'none';
-                
-                // 2. Setup AI
-                const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-                hands.setOptions({maxNumHands: 1, minDetectionConfidence: 0.5});
-                
-                hands.onResults((res) => {
-                    canvas.width = window.innerWidth;
-                    canvas.height = window.innerHeight;
-                    ctx.drawImage(res.image, 0, 0, canvas.width, canvas.height);
-                    if (res.multiHandLandmarks) {
-                        for (const lms of res.multiHandLandmarks) {
-                            drawConnectors(ctx, lms, HAND_CONNECTIONS, {color: '#00FF00'});
-                            drawLandmarks(ctx, lms, {color: '#FF0000', radius: 2});
-                        }
-                    }
-                });
+        hands.onResults((results) => {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            // This line forces the camera image to draw even if tracking hasn't started
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-                // 3. Start Camera
-                const camera = new Camera(video, {
-                    onFrame: async () => { await hands.send({image: video}); },
-                    width: 640, height: 480
-                });
-                
-                print("Requesting hardware access...");
-                await camera.start();
-                print("Camera Active! Show your hand.");
-
-            } catch (err) {
-                print("FATAL ERROR: " + err.message);
-                btn.style.display = 'block';
-                btn.innerText = "RETRY";
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 5});
+                }
             }
-        }
+            canvasCtx.restore();
+        });
+
+        startBtn.onclick = async () => {
+            startBtn.style.display = 'none';
+            status.innerText = "Loading AI... Please wait 5-10 seconds";
+            
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({image: videoElement});
+                },
+                width: 1280, height: 720
+            });
+            
+            try {
+                await camera.start();
+                // Force video play in case it's stuck
+                videoElement.play(); 
+            } catch (e) {
+                status.innerText = "Error: " + e.message;
+            }
+        };
     </script>
 </body>
 </html>
